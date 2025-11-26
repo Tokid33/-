@@ -12,6 +12,11 @@ def run_ffmpeg(cmd: List[str]) -> None:
 
 
 def detect_silence(input_file: Path) -> List[Tuple[float, float]]:
+    """Находит интервалы речи между тишиной.
+
+    Возвращает список кортежей (start, end) в секундах для нес-тихих участков.
+    """
+
     cmd = [
         "ffmpeg",
         "-i",
@@ -26,14 +31,47 @@ def detect_silence(input_file: Path) -> List[Tuple[float, float]]:
     if process.returncode != 0:
         raise RuntimeError(f"Silence detection failed: {process.stdout}")
 
-    boundaries: List[float] = [0.0]
+    silence_spans: List[Tuple[float, float]] = []
+    current_start: float | None = None
     for line in process.stdout.splitlines():
         if "silence_start" in line:
-            boundaries.append(float(line.split("silence_start:")[1].strip()))
-        if "silence_end" in line:
+            current_start = float(line.split("silence_start:")[1].strip())
+        if "silence_end" in line and current_start is not None:
             end = float(line.split("silence_end:")[1].split(" ")[0].strip())
-            boundaries.append(end)
-    return list(zip(boundaries, boundaries[1:]))
+            silence_spans.append((current_start, end))
+            current_start = None
+
+    duration = probe_duration(input_file)
+    scenes: List[Tuple[float, float]] = []
+    cursor = 0.0
+    for start, end in silence_spans:
+        if start > cursor:
+            scenes.append((cursor, start))
+        cursor = max(cursor, end)
+    if duration > cursor:
+        scenes.append((cursor, duration))
+
+    return scenes
+
+
+def probe_duration(input_file: Path) -> float:
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(input_file),
+    ]
+    process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    if process.returncode != 0:
+        raise RuntimeError(f"ffprobe failed: {process.stdout}")
+    try:
+        return float(process.stdout.strip())
+    except ValueError:
+        raise RuntimeError(f"Cannot parse duration from ffprobe output: {process.stdout}")
 
 
 def export_scene(input_file: Path, start: float, end: float, destination: Path) -> Path:

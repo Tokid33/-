@@ -53,6 +53,28 @@ python -m app.main --file input/episode01.mp4
 - `docker-compose.yml` — сервисы app/Postgres/MinIO/n8n.
 - `workflows/majora-shorts.json` — cron → ExecuteCommand (`python -m app.main --once`).
 
+## Инструкция для Никиты (разработчика)
+1. **Развёртывание**
+   - Скопируй `.env.example` → `.env`, пропиши `OPENAI_API_KEY`.
+   - Создай папки `input`, `output`, `workspace` рядом с `docker-compose.yml`.
+   - Запусти `docker compose up --build`. После старта: `app` слушает `./input`, n8n доступен на `http://localhost:5678`.
+2. **Подключение n8n → пайплайн**
+   - В UI n8n: импортируй `workflows/majora-shorts.json` (лежит в volume `./workflows`).
+   - Укажи в ноде ExecuteCommand команду `python -m app.main --once` (или `--watch` для постоянной работы).
+   - Добавь триггер Cron/HTTP как нужно для автопостинга.
+3. **Интеграция с автопостингом**
+   - Пусть автопостер слушает `./output/*.mp4`. Удобно монтировать volume `output` в сервис постинга.
+   - Метаданные сцен (скор, текст) можно читать из `workspace/*.srt` либо писать в БД: в `config.py` уже есть DSN Postgres, таблицы опиши под себя.
+4. **Параметры качества и фильтры**
+   - Шум/тишина: правь `silencedetect` в `ffmpeg_utils.detect_silence` (по умолчанию `-30dB` и `d=0.5`).
+   - Длина сцен: через `.env` (`MIN_SCENE_SECONDS`, `MAX_SCENE_SECONDS`).
+   - Количество шортов: `TOP_SCENES`.
+   - Рендер: `TARGET_WIDTH/TARGET_HEIGHT`, `FONT_PATH` для сабов.
+5. **Проверка, что всё работает**
+   - Помести тестовый `mp4` в `input` и запусти `python -m app.main --once` (или дождись крон-задачи в n8n).
+   - В логах `app` появится: «Отфильтровано N сцен» → «Выбрано топ сцен» → «Готов шорт …». Файлы появятся в `output`.
+   - Ошибки FFmpeg/Whisper/LLM пробрасываются в stderr; контейнер завершится ненулевым кодом.
+
 ## Настройки (.env)
 - `OPENAI_API_KEY` — ключ для транскрипции и скоринга.
 - `POSTGRES_DSN` — строка подключения (Postgres поднимается внутри compose).
